@@ -30,6 +30,7 @@ def main():
     application.add_handler(CommandHandler("start", handlers.start))
     application.add_handler(CommandHandler("setadmin", handlers.set_admin_command))
     application.add_handler(CommandHandler("complete", handlers.complete_order_command))
+    application.add_handler(CommandHandler("reject", handlers.reject_order_command))
     application.add_handler(CommandHandler("pending", handlers.pending_orders_command))
     application.add_handler(CommandHandler("broadcast", handlers.broadcast_command))
     application.add_handler(CommandHandler("setevent", handlers.setevent_command))

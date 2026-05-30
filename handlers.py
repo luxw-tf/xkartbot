@@ -101,7 +101,7 @@ async def select_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return AWAITING_X_USERNAME
 
 async def receive_x_username(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    username = update.message.text
+    username = update.message.text[:100] # Truncate to prevent API crashes
     context.user_data['x_username'] = username
     
     context.user_data['payment_asset'] = None
@@ -198,7 +198,7 @@ async def handle_payment_selection(update: Update, context: ContextTypes.DEFAULT
     return AWAITING_PAYMENT_SELECTION
 
 async def receive_tx_hash(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tx_hash = update.message.text
+    tx_hash = update.message.text[:100] # Truncate to prevent API crashes
     user = update.effective_user
     
     plan_id = context.user_data['plan_id']
@@ -238,7 +238,8 @@ async def receive_tx_hash(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Asset: {asset}\n"
         f"Network: {network}\n"
         f"Tx Hash: <code>{html.escape(tx_hash)}</code>\n\n"
-        f"To complete this order, use:\n<code>/complete {order_id}</code>"
+        f"To complete: <code>/complete {order_id}</code>\n"
+        f"To reject: <code>/reject {order_id} [reason]</code>"
     )
     
     for admin_id in admins:
@@ -252,6 +253,10 @@ async def receive_tx_hash(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query:
         await update.callback_query.answer()
+        try:
+            await update.callback_query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
         await update.callback_query.message.reply_text("Action cancelled.", reply_markup=keyboards.get_reply_main_menu())
     else:
         await update.message.reply_text("Action cancelled.", reply_markup=keyboards.get_reply_main_menu())
@@ -301,6 +306,42 @@ async def complete_order_command(update: Update, context: ContextTypes.DEFAULT_T
     except Exception as e:
         await update.message.reply_text(f"Order updated in DB, but failed to notify user: {e}")
 
+async def reject_order_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    admins = await database.get_admins()
+    
+    if user.id not in admins:
+        await update.message.reply_text("Unauthorized.")
+        return
+        
+    if len(context.args) < 1:
+        await update.message.reply_text("Usage: /reject <order_id> [reason]")
+        return
+        
+    order_id = context.args[0]
+    reason = " ".join(context.args[1:]) if len(context.args) > 1 else "No reason provided."
+    
+    order = await database.get_order(order_id)
+    if not order:
+        await update.message.reply_text(f"Order {order_id} not found.")
+        return
+        
+    await database.update_order_status(order_id, "Cancelled")
+    customer_id = order[1]
+    
+    reject_msg = (
+        f"❌ <b>Order {order_id} Cancelled</b>\n\n"
+        f"Your order has been cancelled by the administrator.\n"
+        f"<b>Reason:</b> {html.escape(reason)}\n\n"
+        f"If you believe this was a mistake or need help, please contact support."
+    )
+    
+    try:
+        await context.bot.send_message(chat_id=customer_id, text=reject_msg, parse_mode=ParseMode.HTML, reply_markup=keyboards.get_completion_buttons())
+        await update.message.reply_text(f"Order {order_id} cancelled. User notified with reason: {reason}")
+    except Exception as e:
+        await update.message.reply_text(f"Order cancelled in DB, but failed to notify user: {e}")
+
 async def pending_orders_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     admins = await database.get_admins()
@@ -318,9 +359,10 @@ async def pending_orders_command(update: Update, context: ContextTypes.DEFAULT_T
         plan_name = config.PLANS.get(o[2], {}).get('name', o[2])
         text += f"📦 <b>Order:</b> <code>{o[0]}</code>\n"
         text += f"💎 <b>Plan:</b> {plan_name}\n"
-        text += f"👤 <b>X User:</b> {o[1]}\n"
-        text += f"🔗 <b>Tx Hash:</b> <code>{o[3]}</code>\n"
-        text += f"✅ <b>Action:</b> <code>/complete {o[0]}</code>\n"
+        text += f"👤 <b>X User:</b> {html.escape(o[1])}\n"
+        text += f"🔗 <b>Tx Hash:</b> <code>{html.escape(o[3])}</code>\n"
+        text += f"✅ <b>Complete:</b> <code>/complete {o[0]}</code>\n"
+        text += f"❌ <b>Reject:</b> <code>/reject {o[0]} [reason]</code>\n"
         text += "───────────────\n"
     
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)

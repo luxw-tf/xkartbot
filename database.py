@@ -58,19 +58,18 @@ async def add_user(user_id, username, first_name):
             VALUES (?, ?, ?)
         ''', (user_id, username, first_name))
         await db.commit()
-        await db.commit()
 
 async def track_activity(user_id, action=None):
     async with aiosqlite.connect(DB_NAME) as db:
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        await db.execute('''
-            UPDATE users SET last_active = ? WHERE user_id = ?
-        ''', (now, user_id))
-        
         if action in ["clicks_prices", "clicks_details", "clicks_event", "orders_started", "orders_completed"]:
             await db.execute(f'''
-                UPDATE users SET {action} = COALESCE({action}, 0) + 1 WHERE user_id = ?
-            ''', (user_id,))
+                UPDATE users SET last_active = ?, {action} = COALESCE({action}, 0) + 1 WHERE user_id = ?
+            ''', (now, user_id))
+        else:
+            await db.execute('''
+                UPDATE users SET last_active = ? WHERE user_id = ?
+            ''', (now, user_id))
         await db.commit()
 
 async def create_order(user_id, x_username, plan_id, tx_hash):
