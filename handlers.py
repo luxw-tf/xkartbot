@@ -351,6 +351,30 @@ async def setevent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Usage: /setevent <message>")
         return
         
-    msg = " ".join(context.args)
-    await database.set_setting("event_text", f"🎉 <b>Current Events</b>\n\n{msg}")
-    await update.message.reply_text("Event text updated successfully!")
+    event_message = " ".join(context.args)
+    await database.set_setting("event_text", event_message)
+    await update.message.reply_text("✅ Event text updated successfully!")
+
+async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    admins = await database.get_admins()
+    if user.id not in admins:
+        await update.message.reply_text("Unauthorized.")
+        return
+        
+    all_users = await database.get_all_users()
+    total_users = len(all_users)
+    
+    text = f"👥 <b>Total Users: {total_users}</b>\n\n"
+    
+    # Show last 20 users to avoid exceeding Telegram message limits
+    recent_users = all_users[-20:] if total_users > 20 else all_users
+    for u in recent_users:
+        username = f"@{u[1]}" if u[1] else "No Username"
+        first_name = html.escape(u[2]) if u[2] else "Unknown"
+        text += f"ID: <code>{u[0]}</code> | {username} | {first_name}\n"
+        
+    if total_users > 20:
+        text += f"\n<i>...and {total_users - 20} more users.</i>"
+        
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML)

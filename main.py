@@ -13,7 +13,11 @@ logging.basicConfig(
 async def post_init(application: Application):
     await database.init_db()
     await application.bot.set_my_commands([
-        BotCommand("start", "Start the bot and open the menu")
+        BotCommand("start", "Start the bot and open the menu"),
+        BotCommand("pending", "Admin: View pending orders"),
+        BotCommand("broadcast", "Admin: Send message to all users"),
+        BotCommand("setevent", "Admin: Set event message"),
+        BotCommand("users", "Admin: View all users"),
     ])
 
 import asyncio
@@ -28,6 +32,7 @@ def main():
     application.add_handler(CommandHandler("pending", handlers.pending_orders_command))
     application.add_handler(CommandHandler("broadcast", handlers.broadcast_command))
     application.add_handler(CommandHandler("setevent", handlers.setevent_command))
+    application.add_handler(CommandHandler("users", handlers.users_command))
     
     # Reply keyboard menu text handlers
     application.add_handler(MessageHandler(filters.Regex('^🛒 Place Order$'), handlers.menu_place_order))
