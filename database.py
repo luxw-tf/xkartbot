@@ -33,6 +33,23 @@ async def init_db():
             )
         ''')
         await db.commit()
+        
+        # Safe migrations: add columns if they don't exist
+        columns_to_add = [
+            ("last_active", "TIMESTAMP"),
+            ("clicks_prices", "INTEGER DEFAULT 0"),
+            ("clicks_details", "INTEGER DEFAULT 0"),
+            ("clicks_event", "INTEGER DEFAULT 0"),
+            ("orders_started", "INTEGER DEFAULT 0"),
+            ("orders_completed", "INTEGER DEFAULT 0")
+        ]
+        
+        for col_name, col_type in columns_to_add:
+            try:
+                await db.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}")
+            except Exception:
+                pass # Column already exists
+        await db.commit()
 
 async def add_user(user_id, username, first_name):
     async with aiosqlite.connect(DB_NAME) as db:
@@ -40,6 +57,20 @@ async def add_user(user_id, username, first_name):
             INSERT OR IGNORE INTO users (user_id, username, first_name)
             VALUES (?, ?, ?)
         ''', (user_id, username, first_name))
+        await db.commit()
+        await db.commit()
+
+async def track_activity(user_id, action=None):
+    async with aiosqlite.connect(DB_NAME) as db:
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        await db.execute('''
+            UPDATE users SET last_active = ? WHERE user_id = ?
+        ''', (now, user_id))
+        
+        if action in ["clicks_prices", "clicks_details", "clicks_event", "orders_started", "orders_completed"]:
+            await db.execute(f'''
+                UPDATE users SET {action} = COALESCE({action}, 0) + 1 WHERE user_id = ?
+            ''', (user_id,))
         await db.commit()
 
 async def create_order(user_id, x_username, plan_id, tx_hash):
@@ -83,9 +114,21 @@ async def get_user_orders(user_id, limit=5):
 
 async def get_all_users():
     async with aiosqlite.connect(DB_NAME) as db:
-        async with db.execute('SELECT user_id FROM users') as cursor:
-            rows = await cursor.fetchall()
-            return [row[0] for row in rows]
+        async with db.execute('SELECT user_id, username, first_name, last_active, orders_started, orders_completed FROM users') as cursor:
+            return await cursor.fetchall()
+
+async def get_global_stats():
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute('''
+            SELECT 
+                SUM(COALESCE(orders_started, 0)), 
+                SUM(COALESCE(orders_completed, 0)),
+                SUM(COALESCE(clicks_prices, 0)),
+                SUM(COALESCE(clicks_details, 0)),
+                SUM(COALESCE(clicks_event, 0))
+            FROM users
+        ''') as cursor:
+            return await cursor.fetchone()
 
 async def get_setting(key, default=None):
     async with aiosqlite.connect(DB_NAME) as db:

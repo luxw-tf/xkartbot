@@ -18,6 +18,7 @@ async def post_init(application: Application):
         BotCommand("broadcast", "Admin: Send message to all users"),
         BotCommand("setevent", "Admin: Set event message"),
         BotCommand("users", "Admin: View all users"),
+        BotCommand("stats", "Admin: View global analytics"),
     ])
 
 import asyncio
@@ -33,6 +34,7 @@ def main():
     application.add_handler(CommandHandler("broadcast", handlers.broadcast_command))
     application.add_handler(CommandHandler("setevent", handlers.setevent_command))
     application.add_handler(CommandHandler("users", handlers.users_command))
+    application.add_handler(CommandHandler("stats", handlers.stats_command))
     application.add_handler(CallbackQueryHandler(handlers.users_page_callback, pattern='^users_page_'))
     
     # Reply keyboard menu text handlers

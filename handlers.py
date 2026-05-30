@@ -13,6 +13,7 @@ AWAITING_X_USERNAME, AWAITING_TX_HASH, AWAITING_ORDER_ID, AWAITING_PAYMENT_SELEC
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     await database.add_user(user.id, user.username, user.first_name)
+    await database.track_activity(user.id)
     
     welcome_text = (
         f"<b>Welcome to Xkart</b>\n\n"
@@ -30,29 +31,36 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 async def menu_place_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = "Please select a subscription plan:"
-    await update.message.reply_text(text, reply_markup=keyboards.get_plans_menu())
+    await database.track_activity(update.effective_user.id, "orders_started")
+    await update.message.reply_text(
+        "Please select a plan from the options below:",
+        reply_markup=keyboards.get_plans_menu()
+    )
 
 async def menu_prices(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = "💵 <b>Our Prices</b>\n\n"
-    for plan_id, plan in config.PLANS.items():
-        text += f"• {plan['name']}: <b>${plan['price']}</b>\n"
+    await database.track_activity(update.effective_user.id, "clicks_prices")
+    text = "💎 <b>Pricing Plans</b>\n\n"
+    for plan_id, plan_data in config.PLANS.items():
+        text += f"▪️ <b>{plan_data['name']}</b>: ${plan_data['price']}\n"
+    
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 async def menu_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await database.track_activity(update.effective_user.id, "clicks_details")
     text = (
         "ℹ️ <b>Service Details</b>\n\n"
-        "We provide instant upgrades for your X (Twitter) account to Premium status.\n"
-        "All upgrades are processed quickly after your crypto payment is confirmed.\n\n"
-        f"For support, contact {config.ADMIN_USERNAME}."
+        "We offer fast, reliable digital services with instant crypto payments. "
+        "Upon completing your order, it will be reviewed and applied to your account shortly."
     )
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 async def menu_event(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    event_text = await database.get_setting("event_text", "🎉 <b>Current Events</b>\n\nNo active events at the moment. Stay tuned!")
+    await database.track_activity(update.effective_user.id, "clicks_event")
+    event_text = await database.get_setting("event_text", "No active events right now. Check back later!")
     await update.message.reply_text(event_text, parse_mode=ParseMode.HTML)
 
 async def menu_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await database.track_activity(update.effective_user.id, "clicks_history")
     user = update.effective_user
     orders = await database.get_user_orders(user.id)
     if not orders:
@@ -198,6 +206,7 @@ async def receive_tx_hash(update: Update, context: ContextTypes.DEFAULT_TYPE):
     x_username = context.user_data['x_username']
     
     order_id = await database.create_order(user.id, x_username, plan_id, tx_hash)
+    await database.track_activity(user.id, "orders_completed")
     
     date_str = datetime.datetime.now().strftime("%d %b %Y")
     
@@ -323,20 +332,31 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Unauthorized.")
         return
         
-    if not context.args:
-        await update.message.reply_text("Usage: /broadcast <message>")
+    if not context.args and not update.message.photo:
+        await update.message.reply_text("Usage: /broadcast <message> (or attach a photo with caption)")
         return
         
-    msg = update.message.text.partition(' ')[2].strip()
     users = await database.get_all_users()
-    
     sent = 0
-    for uid in users:
-        try:
-            await context.bot.send_message(chat_id=uid, text=f"📢 <b>Broadcast</b>\n\n{msg}", parse_mode=ParseMode.HTML)
-            sent += 1
-        except Exception:
-            pass
+    
+    if update.message.photo:
+        photo = update.message.photo[-1].file_id
+        caption_text = update.message.caption if update.message.caption else ""
+        msg = caption_text.partition(' ')[2].strip() if caption_text.startswith('/broadcast') else caption_text
+        for u in users:
+            try:
+                await context.bot.send_photo(chat_id=u[0], photo=photo, caption=f"📢 <b>Broadcast</b>\n\n{msg}", parse_mode=ParseMode.HTML)
+                sent += 1
+            except Exception:
+                pass
+    else:
+        msg = update.message.text.partition(' ')[2].strip()
+        for u in users:
+            try:
+                await context.bot.send_message(chat_id=u[0], text=f"📢 <b>Broadcast</b>\n\n{msg}", parse_mode=ParseMode.HTML)
+                sent += 1
+            except Exception:
+                pass
             
     await update.message.reply_text(f"Broadcast sent to {sent}/{len(users)} users.")
 
@@ -379,9 +399,11 @@ async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     text = f"👥 <b>Total Users: {total_users}</b> (Page {page+1}/{total_pages})\n\n"
     for u in page_users:
-        username = f"@{u[1]}" if u[1] else "No Username"
+        username = f"@{u[1]}" if u[1] else "NoUser"
         first_name = html.escape(u[2]) if u[2] else "Unknown"
-        text += f"ID: <code>{u[0]}</code> | {username} | {first_name}\n"
+        last_active = u[3] if u[3] else "Never"
+        orders = f"[{u[4] or 0}/{u[5] or 0}]"
+        text += f"ID: <code>{u[0]}</code> | {username} | {orders} | 🕒 {last_active}\n"
         
     keyboard = keyboards.get_users_pagination_keyboard(page, total_pages)
     await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
@@ -409,9 +431,32 @@ async def users_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     text = f"👥 <b>Total Users: {total_users}</b> (Page {page+1}/{total_pages})\n\n"
     for u in page_users:
-        username = f"@{u[1]}" if u[1] else "No Username"
+        username = f"@{u[1]}" if u[1] else "NoUser"
         first_name = html.escape(u[2]) if u[2] else "Unknown"
-        text += f"ID: <code>{u[0]}</code> | {username} | {first_name}\n"
+        last_active = u[3] if u[3] else "Never"
+        orders = f"[{u[4] or 0}/{u[5] or 0}]"
+        text += f"ID: <code>{u[0]}</code> | {username} | {orders} | 🕒 {last_active}\n"
         
     keyboard = keyboards.get_users_pagination_keyboard(page, total_pages)
     await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    admins = await database.get_admins()
+    if user.id not in admins:
+        await update.message.reply_text("Unauthorized.")
+        return
+        
+    stats = await database.get_global_stats()
+    
+    text = (
+        "📊 <b>Global Analytics</b>\n\n"
+        f"🛒 <b>Orders Started:</b> {stats[0] or 0}\n"
+        f"✅ <b>Orders Completed:</b> {stats[1] or 0}\n"
+        f"🛑 <b>Drop-offs (Abandoned):</b> {(stats[0] or 0) - (stats[1] or 0)}\n\n"
+        "🖱 <b>Menu Clicks</b>\n"
+        f"▪️ Prices: {stats[2] or 0}\n"
+        f"▪️ Details: {stats[3] or 0}\n"
+        f"▪️ Event: {stats[4] or 0}\n"
+    )
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML)
