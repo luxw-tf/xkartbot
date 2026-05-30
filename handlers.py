@@ -327,7 +327,7 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Usage: /broadcast <message>")
         return
         
-    msg = " ".join(context.args)
+    msg = update.message.text.partition(' ')[2].strip()
     users = await database.get_all_users()
     
     sent = 0
@@ -351,7 +351,7 @@ async def setevent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Usage: /setevent <message>")
         return
         
-    event_message = " ".join(context.args)
+    event_message = update.message.text.partition(' ')[2].strip()
     await database.set_setting("event_text", event_message)
     await update.message.reply_text("✅ Event text updated successfully!")
 
@@ -362,19 +362,56 @@ async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Unauthorized.")
         return
         
-    all_users = await database.get_all_users()
+    all_users = list(reversed(await database.get_all_users()))
     total_users = len(all_users)
     
-    text = f"👥 <b>Total Users: {total_users}</b>\n\n"
+    per_page = 10
+    total_pages = (total_users + per_page - 1) // per_page
     
-    # Show last 20 users to avoid exceeding Telegram message limits
-    recent_users = all_users[-20:] if total_users > 20 else all_users
-    for u in recent_users:
+    if total_users == 0:
+        await update.message.reply_text("No users found.")
+        return
+        
+    page = 0
+    start_idx = page * per_page
+    end_idx = start_idx + per_page
+    page_users = all_users[start_idx:end_idx]
+    
+    text = f"👥 <b>Total Users: {total_users}</b> (Page {page+1}/{total_pages})\n\n"
+    for u in page_users:
         username = f"@{u[1]}" if u[1] else "No Username"
         first_name = html.escape(u[2]) if u[2] else "Unknown"
         text += f"ID: <code>{u[0]}</code> | {username} | {first_name}\n"
         
-    if total_users > 20:
-        text += f"\n<i>...and {total_users - 20} more users.</i>"
+    keyboard = keyboards.get_users_pagination_keyboard(page, total_pages)
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+
+async def users_page_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    user = update.effective_user
+    admins = await database.get_admins()
+    if user.id not in admins:
+        await query.edit_message_text("Unauthorized.")
+        return
         
-    await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+    page = int(query.data.split('_')[2])
+    all_users = list(reversed(await database.get_all_users()))
+    total_users = len(all_users)
+    
+    per_page = 10
+    total_pages = (total_users + per_page - 1) // per_page
+    
+    start_idx = page * per_page
+    end_idx = start_idx + per_page
+    page_users = all_users[start_idx:end_idx]
+    
+    text = f"👥 <b>Total Users: {total_users}</b> (Page {page+1}/{total_pages})\n\n"
+    for u in page_users:
+        username = f"@{u[1]}" if u[1] else "No Username"
+        first_name = html.escape(u[2]) if u[2] else "Unknown"
+        text += f"ID: <code>{u[0]}</code> | {username} | {first_name}\n"
+        
+    keyboard = keyboards.get_users_pagination_keyboard(page, total_pages)
+    await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)

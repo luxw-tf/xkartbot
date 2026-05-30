@@ -33,6 +33,7 @@ def main():
     application.add_handler(CommandHandler("broadcast", handlers.broadcast_command))
     application.add_handler(CommandHandler("setevent", handlers.setevent_command))
     application.add_handler(CommandHandler("users", handlers.users_command))
+    application.add_handler(CallbackQueryHandler(handlers.users_page_callback, pattern='^users_page_'))
     
     # Reply keyboard menu text handlers
     application.add_handler(MessageHandler(filters.Regex('^🛒 Place Order$'), handlers.menu_place_order))

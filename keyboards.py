@@ -21,6 +21,15 @@ def get_back_button():
     keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="cancel_order")]]
     return InlineKeyboardMarkup(keyboard)
 
+def get_users_pagination_keyboard(current_page, total_pages):
+    buttons = []
+    if current_page > 0:
+        buttons.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"users_page_{current_page - 1}"))
+    if current_page < total_pages - 1:
+        buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"users_page_{current_page + 1}"))
+        
+    return InlineKeyboardMarkup([buttons]) if buttons else None
+
 def get_post_order_buttons():
     keyboard = [
         [InlineKeyboardButton("💬 Contact Support", url=f"https://t.me/{config.ADMIN_USERNAME.strip('@')}")]
